@@ -12,6 +12,7 @@ holds both the model architecture and its associated weights.
 import tensorflow as tf
 from tensorflow.python.framework import graph_util
 from tensorflow.python.framework import graph_io
+from tensorflow.python.platform import gfile
 from pathlib import Path
 from absl import app
 from absl import flags
@@ -41,6 +42,10 @@ flags.DEFINE_boolean('quantize', False,
                      'converted from float into eight-bit equivalents. See '
                      'documentation here: '
                      'https://github.com/tensorflow/tensorflow/tree/master/tensorflow/tools/graph_transforms')
+flags.DEFINE_boolean('optimize', False,
+                     'If set, the resultant TensorFlow graph weights will be optimized.'
+                     'See documentation here: '
+                     'https://github.com/tensorflow/tensorflow/blob/master/tensorflow/python/tools/optimize_for_inference.py')
 flags.DEFINE_boolean('channels_first', False,
                      'Whether channels are the first dimension of a tensor. '
                      'The default is TensorFlow behaviour where channels are '
@@ -50,8 +55,16 @@ flags.DEFINE_boolean('output_meta_ckpt', False,
                      '.data files, with a checkpoint file. These can be later '
                      'loaded in TensorFlow to continue training.')
 
+flags.DEFINE_string('input_names', None, 'Name of the input nodes. Must be given when running --optimize.')
+flags.DEFINE_string('output_names', None, 'Name of the output nodes. Used when running --optimize to remove unused nodes.')
+
+
 flags.mark_flag_as_required('input_model')
 flags.mark_flag_as_required('output_model')
+
+if FLAGS.optimize:
+    if not FLAGS.input_names:
+        raise RuntimeError('Must set --input_names when running w/ --optimize.')
 
 
 def load_model(input_model_path, input_json_path=None, input_yaml_path=None):
@@ -157,24 +170,32 @@ def main(args):
         logging.info('Saved the graph definition in ascii format at %s',
                      str(Path(output_fld) / output_model_pbtxt_name))
 
+    constant_graph = graph_util.convert_variables_to_constants(
+        sess,
+        sess.graph.as_graph_def(),
+        converted_output_node_names)
+
+    output_node_names = FLAGS.output_names.split(",") if FLAGS.output_names else converted_output_node_names
+    if FLAGS.optimize:
+        from tensorflow.python.tools.optimize_for_inference_lib import optimize_for_inference
+        from tensorflow.python.framework import dtypes
+        constant_graph = optimize_for_inference(
+            constant_graph,
+            FLAGS.input_names.split(","),
+            output_node_names,
+            dtypes.float32.as_datatype_enum
+            )
+
     if FLAGS.quantize:
         from tensorflow.tools.graph_transforms import TransformGraph
         transforms = ["quantize_weights", "quantize_nodes"]
-        transformed_graph_def = TransformGraph(sess.graph.as_graph_def(), [],
-                                               converted_output_node_names,
-                                               transforms)
-        constant_graph = graph_util.convert_variables_to_constants(
-            sess,
-            transformed_graph_def,
-            converted_output_node_names)
-    else:
-        constant_graph = graph_util.convert_variables_to_constants(
-            sess,
-            sess.graph.as_graph_def(),
-            converted_output_node_names)
+        constant_graph = TransformGraph(constant_graph, [],
+                                        output_node_names,
+                                        transforms)
 
-    graph_io.write_graph(constant_graph, str(output_fld), output_model_name,
-                         as_text=False)
+    f = gfile.GFile(output_model, "w")
+    f.write(constant_graph.SerializeToString())
+    
     logging.info('Saved the freezed graph at %s',
                  str(Path(output_fld) / output_model_name))
 
