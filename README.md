@@ -1,4 +1,7 @@
 # Keras to TensorFlow
+
+**Currently does not support TF2.0**
+
 The **keras_to_tensorflow** is a tool that converts a trained keras model into a ready-for-inference TensorFlow model. *The tool is NOT tailored for TensorFlow 2.0 it SEEMS to be working fine.*
 
 #### Summary
