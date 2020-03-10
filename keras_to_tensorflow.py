@@ -20,7 +20,6 @@ import keras
 from keras import backend as K
 from keras.models import model_from_json, model_from_yaml
 
-K.set_learning_phase(0)
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string('input_model', None, 'Path to the input model.')
@@ -60,7 +59,7 @@ def load_model(input_model_path, input_json_path=None, input_yaml_path=None):
         raise FileNotFoundError(
             'Model file `{}` does not exist.'.format(input_model_path))
     try:
-        model = keras.models.load_model(input_model_path)
+        model = keras.models.load_model(input_model_path, compile=False)
         return model
     except FileNotFoundError as err:
         logging.error('Input mode file (%s) does not exist.', FLAGS.input_model)
@@ -126,6 +125,8 @@ def main(args):
         K.set_image_data_format('channels_last')
 
     model = load_model(FLAGS.input_model, FLAGS.input_model_json, FLAGS.input_model_yaml)
+
+    K.set_learning_phase(0)
 
     # TODO(amirabdi): Support networks with multiple inputs
     orig_output_node_names = [node.op.name for node in model.outputs]
